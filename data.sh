@@ -1,0 +1,1 @@
+python logic_puzzle/graph/reasoning_path.py --input_data logic_grid_puzzles/advanced_data_v2/logic_grid_puzzles.train_4x4.pkl  --ground_truth logic_grid_puzzles/advanced_data_v2/logic_grid_puzzles.train_4x4.json --size 4x

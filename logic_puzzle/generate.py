@@ -3,7 +3,8 @@ puzzle_generator.py
 
 This is a driver script that can be used to generate new zebra puzzles.
 """
-
+import sys
+sys.path.append("./logic_puzzle/graph")
 from random import seed, choices, randint, sample, shuffle
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Type
 import json
@@ -11,6 +12,9 @@ from tqdm import tqdm
 from itertools import product
 import sys
 import pickle
+import multiprocessing
+from functools import partial
+from tqdm.auto import tqdm
 
 from clues import (
     Clue,
@@ -208,7 +212,7 @@ def reduce_individually(
     and added to `removed`. If no clues can be removed, we return the original two sets.
     """
 
-    candidates = sample(clues, len(clues)) 
+    candidates = sample(list(clues), len(clues)) 
     for clue in candidates:
         if clue not in must_have:
             clues.remove(clue)
@@ -255,8 +259,8 @@ def reduce_clues(puzzle: Puzzle, clues: Set[Clue], must_have=set()) -> Tuple[Set
 
     """
 
-    # this is a stupid way to shuffle the set of clues without modifying it
-    minimal_clues = set(sample(clues, k=len(clues))) 
+    # Convert set to list before sampling
+    minimal_clues = set(sample(list(clues), k=len(clues))) 
     while True:
         # print(f"There are {len(minimal_clues)} clues in ba sing se")
 
@@ -363,6 +367,8 @@ def wrap_up_dict(random_elements, solution, puzzle, reduced, extra_clues, contex
     all_in_one["puzzle"] = str(puzzle)
     all_in_one["questions"] = q_data
     all_in_one["solution"] = {"table_str": table, "table_rows": table_data, "table_header": col_names}
+    # Convert set to list before sampling
+    extra_clues = sample(list(extra_clues), min(len(extra_clues), 30))
     return all_in_one
 
 def check_correctness(p):
@@ -397,7 +403,8 @@ def generate_puzzle(K = 2, M = 3, mode="train"):
 
     reduced, _ = reduce_clues(puzzle, clues)
     extra_clues = clues - reduced
-    extra_clues = sample(extra_clues, min(len(extra_clues), 30))
+    # Convert set to list before sampling
+    extra_clues = sample(list(extra_clues), min(len(extra_clues), 30))
     for clue in reduced:
         puzzle.add_clue(clue)
 
@@ -406,58 +413,75 @@ def generate_puzzle(K = 2, M = 3, mode="train"):
     all_in_one = wrap_up_dict(random_elements, solution, puzzle, reduced, extra_clues, context, K, M)
     return all_in_one, puzzle
 
+def generate_puzzle_worker(args):
+    """Worker function for generating a single puzzle"""
+    K, M, idx, mode = args
+    try:
+        instance, puzzle = generate_puzzle(K, M, mode)
+        instance["idx"] = f"lgp-{mode}-{K}x{M}-{idx}"
+        return {"instance": instance, "puzzle": {"idx": instance["idx"], "puzzle": puzzle}}
+    except Exception as e:
+        print(f"Error generating puzzle {K}x{M}-{idx}: {str(e)}")
+        return None
+
 def main():
     mode = sys.argv[1]
     print(f"mode={mode}")
+    
+    # Configure parameters based on mode
     if mode.startswith("train"):
         seed(1337)
-        N = 30
-        if mode.endswith("_large"):
-            N = 150
-        if mode.endswith("_xl"):
-            N = 1000
-        Ks = [2,3,4]
-        Ms = [2,3,4]
-
-        if mode.endswith("_xxl"):
-            N = 500
-            Ks = [2,3,4,5,6]
-            Ms = [2,3,4,5,6]
-        
-    elif mode == "dev" or mode.startswith("test_"):
+        N = 12500
+        Ks = [3]
+        Ms = [3]
+        if "train_large" in mode:
+            N = 125000
+        if "train_small" in mode:
+            N = 1250
+        if "4x4" in mode:
+            Ks = [4]
+            Ms = [4]
+    elif mode == "dev" or mode.startswith("test") or mode.startswith("dev"):
         seed(42+len(mode))
-        N = 10
-        Ks = [2,3,4,5]
-        Ms = [2,3,4,5] 
-        if mode.startswith("test_id_xl"):
-            Ks = [2,3,4,5,6]
-            Ms = [2,3,4,5,6] 
-        if mode.startswith("test_id_xxl"):
-            Ks = [2,3,4,5,6,7]
-            Ms = [2,3,4,5,6,7] 
-        if mode.endswith("_50"):
-            N = 50
-
-    instances = []
-    puzzle_objs = []
-    for K, M, idx in tqdm(list(product(Ks, Ms, list(range(N))))):
-        if mode.startswith("test_id_xl"):
-            if K != 6 and M != 6:
-                continue
-        if mode.startswith("test_id_xxl"):
-            if K != 7 and M != 7:
-                continue
-        instance, puzzle = generate_puzzle(K, M, mode)
-        instance["idx"] = f"lgp-{mode}-{K}x{M}-{idx}"
-        instances.append(instance)
-        puzzle_objs.append({"idx": instance["idx"], "puzzle": puzzle})
-
+        N = 360
+        Ks = [3]
+        Ms = [3]
+        if "4x4" in mode:
+            Ks = [4]
+            Ms = [4]
+    
+    # Create task list
+    tasks = []
+    for K, M, idx in product(Ks, Ms, list(range(N))):
+        tasks.append((K, M, idx, mode))
+    
+    # Set up multiprocessing
+    num_cores = multiprocessing.cpu_count()
+    pool = multiprocessing.Pool(processes=num_cores)
+    
+    print(f"Generating {len(tasks)} puzzles using {num_cores} CPU cores")
+    
+    # Process puzzles in parallel with progress bar
+    results = list(tqdm(
+        pool.imap(generate_puzzle_worker, tasks),
+        total=len(tasks),
+        desc="Generating puzzles"
+    ))
+    
+    pool.close()
+    pool.join()
+    
+    # Filter out any failed generations and separate instances and puzzles
+    results = [r for r in results if r is not None]
+    instances = [r['instance'] for r in results]
+    puzzle_objs = [r['puzzle'] for r in results]
+    
+    # Save results
     with open(f"logic_grid_puzzles/advanced_data_v2/logic_grid_puzzles.{mode}.pkl", "wb") as f:
         pickle.dump(puzzle_objs, f)
 
     with open(f"logic_grid_puzzles/advanced_data_v2/logic_grid_puzzles.{mode}.json", "w") as f:
         json.dump(instances, f, indent=2)
-
 
 if __name__ == "__main__":
     main()
