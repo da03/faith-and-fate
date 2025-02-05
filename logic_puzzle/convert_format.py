@@ -14,7 +14,8 @@ def format_solution_table(header, rows):
 def format_puzzle_input(puzzle, context, include_extra_rules=False):
     """Extract and format the puzzle input including context"""
     #import pdb; pdb.set_trace()
-    context_str = context.replace('This is a logic puzzle. There are 3 houses (numbered 1 on the left, 3 on the right), from the perspective of someone standing across the street from them. Each has a different person in them. They have different characteristics:', '').strip()
+    context_str = context.replace('This is a logic puzzle. There are 4 houses (numbered 1 on the left, 4 on the right), from the perspective of someone standing across the street from them. Each has a different person in them. They have different characteristics:', '').strip()
+    context_str = context_str.replace('This is a logic puzzle. There are 3 houses (numbered 1 on the left, 3 on the right), from the perspective of someone standing across the street from them. Each has a different person in them. They have different characteristics:', '').strip()
 
     # Context is already a formatted string, just replace newlines
     context_str = context_str.replace('\n', '<newline>')
